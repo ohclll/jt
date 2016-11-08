@@ -1,0 +1,37 @@
+# coding: utf-8
+# __author__ = ''
+# __date__ = '11/8/2016'
+import os.path as osp
+import pandas as pd
+import numpy as np
+from config import config as cfg
+
+def haversine(lon1, lat1, lon2, lat2): # 经度1，纬度1，经度2，纬度2 （十进制度数）
+    """
+    Calculate the great circle distance between two points
+    on the earth (specified in decimal degrees)
+    """
+    # 将十进制度数转化为弧度
+    lon1, lat1, lon2, lat2 = map(np.radians, [lon1, lat1, lon2, lat2])
+
+    # haversine公式
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = np.sin(dlat/2)**2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon/2)**2
+    c = 2 * np.asin(np.sqrt(a))
+    r = 6371 # 地球平均半径，单位为公里
+    return c * r * 1000
+
+day=3
+file_path = osp.join(cfg.data_dir, '201408{:02d}_train.txt'.format(day))
+names=['taxi_id','lat','lng','load','time']
+dtypes=dict(zip(names,['int32','float32','float32','uint8',str]))
+d=pd.read_csv(file_path,header=None,names=names,dtype=dtypes,
+              # parse_dates=['time']
+              )
+te=pd.read_csv(osp.join(cfg.data_dir, 'predPaths_test.txt'),header=None,
+               names=['path_id', 'taxi_id', 'lat', 'lng', 'load', 'time'])
+te['day']=te['time'].map(lambda x:int(x.split(' ')[0].split('/')[-1]))
+te['hour']=te['time'].map(lambda x:int(x.split(' ')[1].split(':')[0]))
+te.drop('time',axis=1,inplace=True)
+print d.shape
