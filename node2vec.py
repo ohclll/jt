@@ -8,17 +8,19 @@ import numpy as np
 import networkx as nx
 import random
 from gensim.models.word2vec import LineSentence,Word2Vec
+from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import cpu_count
+from collections import defaultdict
 from six.moves import zip_longest
 random.seed(2017)
 np.random.seed(2017)
 
-
-class ThinGraph(dict):
+class ThinGraph(defaultdict):
     """
     Efficient implementation of nx.DiGraph for reduce memory used.
     """
-    def __init__(self, **kwargs):
-        super(ThinGraph, self).__init__(**kwargs)
+    def __init__(self):
+        super(ThinGraph, self).__init__(defaultdict(float))
 
     def order(self):
         return len(self)
@@ -26,17 +28,14 @@ class ThinGraph(dict):
     def nodes(self):
         return self.iterkeys()
 
-    def neighbors(self, node):
-        try:
-            return self[node].keys()
-        except KeyError:
-            raise Exception('The node {} is not in the graph'.format(node))
+    def neighbors(self, u):
+        return self[u].keys()
+
+    def has_node(self, u):
+        return u in self
 
     def has_edge(self,u,v):
-        try :
-            return v in self[u]
-        except KeyError:
-            return False
+        return self.has_node(u) and v in self[u]
 
     def edges(self):
         for u in self.nodes():
@@ -44,20 +43,17 @@ class ThinGraph(dict):
                 yield (u, v, self[u][v])
 
     def add_edges_from(self,edges):
-        for u,v,d in edges:
-            self.add_edge(u,v,d)
+        for e in edges:
+            self.add_edge(*e)
 
     def add_node(self,u):
         if u not in self:
-            self[u]={}
+            self[u]=defaultdict(float)
 
     def add_edge(self, u, v, d=1.):
         if u != v:
-            if u in self:
-                self[u][v] = d
-            else:
-                self[u] = {v: d}
-            self.add_node(v)
+            self[u][v] = d
+            # self.add_node(v)
 
     def make_undirected(self):
         for u,v,d in self.edges():
@@ -70,26 +66,13 @@ class ThinGraph(dict):
                     vlist=l.strip().split()
                     vlist=map(int,vlist)
                     u=vlist.pop(0)
-                    self.add_edges_from([(u, v, 1) for v in vlist])
+                    self.add_edges_from([(u, v) for v in vlist])
 
     def load_edgelist(self,path, func=lambda x: x):
         with open(path, 'r') as f:
             for l in f:
                 u, v, d=l.strip().split(',')
                 self.add_edge((int(u), int(v), func(float(d))))
-
-    def load_dc_ulink(self,path):
-        with open(path) as f:
-            i = 0
-            for line in f:
-                i += 1
-                if i % 100000 == 0: print i
-                vlist = re.split('\t|\x01', line.strip())
-                if len(vlist) < 2: continue
-                vlist = map(np.int32, vlist)
-                u = vlist.pop(0)
-                edges=[(v, u, 1.0) for v in vlist]
-                self.add_edges_from(edges)
 
 
 class Graph():
@@ -149,9 +132,7 @@ class Graph():
         random: 和deepwalk一样随机选
         net2vec：根据概率选
         '''
-        walk_method=self.node2vec_walk
-        if method=='random':
-            walk_method=self.random_walk
+        walk_method={'node2vec':self.node2vec_walk,'random':self.random_walk}
         G = self.G
         nodes = list(G.nodes())
         nb_node = len(nodes)
@@ -168,7 +149,7 @@ class Graph():
                     walks=[]
                     for n in ns:
                         if n:
-                            walk=walk_method(walk_length=walk_length, start_node=n)
+                            walk=walk_method[method](walk_length=walk_length, start_node=n)
                     if len(walk)>2:
                         walks.append(walk)
                     for walk in walks:
@@ -252,6 +233,51 @@ def alias_draw(J, q):
         return J[kk]
 
 
+def grouper(n, iterable, padvalue=None):
+    "grouper(3, 'abcdefg', 'x') --> ('a','b','c'), ('d','e','f'), ('g','x','x')"
+    return zip_longest(*[iter(iterable)]*n, fillvalue=padvalue)
+
+
+def parse_ulink(f):
+    edges = []
+    for line in f:
+        if line:
+            vlist = re.split('\t|\x01', line.strip())
+            if len(vlist) < 2: continue
+            vlist = map(int, vlist)
+            u = vlist.pop(0)
+            edges.extend([(v, u) for v in vlist])
+    return edges
+
+
+def load_dc_ulink(path,chunk_size=400000):
+    """
+    load with multi-process
+    """
+    G=ThinGraph()
+    with codecs.open(path,encoding='utf8') as f:
+        with ProcessPoolExecutor(max_workers=20) as executor:
+            for idx, edges in enumerate(executor.map(parse_ulink, grouper(int(chunk_size), f))):
+                print idx
+                G.add_edges_from(edges)
+        return G
+
+
+def load_dc_ulink0(path):
+    G = ThinGraph()
+    with open(path) as f:
+        i = 0
+        for line in f:
+            i += 1
+            if i % 100000 == 0: print i
+            vlist = re.split('\t|\x01', line.strip())
+            if len(vlist) < 2: continue
+            vlist = map(np.int32, vlist)
+            u = vlist.pop(0)
+            edges = [(v, u, 1.0) for v in vlist]
+            G.add_edges_from(edges)
+
+
 def repost_weight(repost_path,edgelist_path):
     g=ThinGraph()
     with codecs.open(repost_path,'r',encoding='utf8') as f:
@@ -267,12 +293,12 @@ def repost_weight(repost_path,edgelist_path):
         for u,v,d in g.edges():
             f.write('{},{},{}\n'.format(u,v,d))
 
+
 if __name__=='__main__':
     import cPickle
 
     # 使用好友关系构建图，这个图和deepwalk的区别在于是有向图，而且可以保存连接权重，内存消耗稍大一些，默认权重为1
-    g = ThinGraph()
-    g.load_dc_ulink('weibo_dc_parse2015_link_filter')
+    g = load_dc_ulink('weibo_dc_parse2015_link_filter')
     # g.make_undirected() 转化为无向图
 
     # 增加发生转发的边的权重
@@ -281,13 +307,13 @@ if __name__=='__main__':
     # g.load_edgelist(edgelist,lambda x: 1+np.log10(1+x))
 
     # 当p=1,q=1且method='random'的时候和deepwalk一致，只是这里用的是有向图。method改为node2vec并修改p,q值，可以使用node2vec的随机游走采样方法
-    corpus_file = 'walks_node2vec.csv'
+    corpus_file = 'walks.csv'
     G = Graph(g, p=1.0, q=1.0)
-    G.simulate_walks(out_file=corpus_file, num_walks=1, walk_length=16,method='random')
+    G.simulate_walks(out_file=corpus_file, num_walks=2, walk_length=10,method='random')
 
     print 'simulate_walks finshed!\n start traing...'
     corpus = LineSentence(corpus_file)
-    model = Word2Vec(corpus, size=64, window=3, min_count=1, sg=1, workers=32, iter=2,sorted_vocab=False)
+    model = Word2Vec(corpus, size=64, window=3, min_count=1, sg=1, workers=cpu_count()-5, iter=2,sorted_vocab=False)
     model.save_word2vec_format('uid2vec.bin',binary=True)
 
     # uids = cPickle.load(open('train_uids.pkl'))
