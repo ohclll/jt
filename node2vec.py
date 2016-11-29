@@ -52,7 +52,10 @@ class ThinGraph(dict):
 
     def add_edge(self, u, v, d=1.):
         if u != v:
-            self[u] = {v: d}
+            if u in self:
+                self[u][v] = d
+            else:
+                self[u] = {v: d}
             self.add_node(v)
 
     def make_undirected(self):
