@@ -30,7 +30,10 @@ class ThinGraph(defaultdict):
         return self.iterkeys()
 
     def neighbors(self, u):
-        return list(self[u])
+        if u in self:
+            return list(self[u])
+        else:
+            return []
 
     def has_node(self, u):
         return u in self
@@ -72,7 +75,7 @@ class ThinGraph(defaultdict):
         with open(path, 'r') as f:
             for l in f:
                 u, v, d=l.strip().split(',')
-                self.add_edge((int(u), int(v), func(float(d))))
+                self.add_edge(int(u), int(v), func(float(d)))
 
 
 class Graph():
@@ -253,7 +256,7 @@ def load_dc_ulink2(path,chunk_size=1e6):
     """
     load with multi-process
     """
-    G=ThinGraph()
+    g=ThinGraph()
     with open(path) as f:
         lines=f.readlines()
         print 'lines: ',len(lines)
@@ -263,12 +266,12 @@ def load_dc_ulink2(path,chunk_size=1e6):
         with ProcessPoolExecutor(max_workers=10) as executor:
             for idx, edges in enumerate(executor.map(parse_ulink, grouper(int(1e5), line_group))):
                 print idx
-                G.add_edges_from(edges)
-    return G
+                g.add_edges_from(edges)
+    return g
 
 
 def load_dc_ulink(path):
-    G = ThinGraph()
+    g = ThinGraph()
     with open(path) as f:
         lines=f.readlines()
         i = 0
@@ -280,7 +283,8 @@ def load_dc_ulink(path):
             vlist = map(np.int32, vlist)
             u = vlist.pop(0)
             edges = [(v, u, 1.0) for v in vlist]
-            G.add_edges_from(edges)
+            g.add_edges_from(edges)
+    return g
 
 
 def repost_weight(repost_path,edgelist_path):
@@ -293,10 +297,19 @@ def repost_weight(repost_path,edgelist_path):
             if g.has_edge(u,v):
                 g[u][v] += 1
             else:
-                g.add_edge(u,v,1.0)
+                g.add_edge(u,v)
     with open(edgelist_path,'w') as f:
         for u,v,d in g.edges():
             f.write('{},{},{}\n'.format(u,v,d))
+
+
+def parse_walk(f):
+    walks=[]
+    for line in f:
+        if line:
+            walk=line.strip().split(' ')
+            walks.append(walk)
+    return walks
 
 
 if __name__=='__main__':
@@ -317,7 +330,16 @@ if __name__=='__main__':
     G.simulate_walks(out_file=corpus_file, num_walks=2, walk_length=10,method='random')
 
     print 'simulate_walks finshed!\n start traing...'
-    corpus = LineSentence(corpus_file)
+    # corpus = LineSentence(corpus_file)
+    corpus=[]
+    with open(corpus_file) as f:
+        with ProcessPoolExecutor(max_workers=32) as executor:
+            total = 0
+            for idx, walk_chunk in enumerate(executor.map(parse_walk, grouper(int(100000), f))):
+                print idx,len(walk_chunk)
+                corpus.extend(walk_chunk)
+                total += len(walk_chunk)
+    print 'tatal line {}'.format(total)
     model = Word2Vec(corpus, size=64, window=3, min_count=1, sg=1, workers=cpu_count()-5, iter=2,sorted_vocab=False)
     model.save_word2vec_format('uid2vec.bin',binary=True)
 
@@ -329,6 +351,3 @@ if __name__=='__main__':
     #     for i,u in enumerate(uids):
     #         u_embed=model[str(u)].tolist()
     #         f.write(str(u)+','+','.join(map(str,u_embed))+'\n')
-
-
-
