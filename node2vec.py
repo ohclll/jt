@@ -15,12 +15,13 @@ from six.moves import zip_longest
 random.seed(2017)
 np.random.seed(2017)
 
+
 class ThinGraph(defaultdict):
     """
     Efficient implementation of nx.DiGraph for reduce memory used.
     """
     def __init__(self):
-        super(ThinGraph, self).__init__(defaultdict(float))
+        super(ThinGraph, self).__init__(dict)
 
     def order(self):
         return len(self)
@@ -29,7 +30,7 @@ class ThinGraph(defaultdict):
         return self.iterkeys()
 
     def neighbors(self, u):
-        return self[u].keys()
+        return list(self[u])
 
     def has_node(self, u):
         return u in self
@@ -48,12 +49,11 @@ class ThinGraph(defaultdict):
 
     def add_node(self,u):
         if u not in self:
-            self[u]=defaultdict(float)
+            self[u]={}
 
-    def add_edge(self, u, v, d=1.):
+    def add_edge(self, u, v, d=1.0):
         if u != v:
             self[u][v] = d
-            # self.add_node(v)
 
     def make_undirected(self):
         for u,v,d in self.edges():
@@ -141,10 +141,10 @@ class Graph():
         with open(out_file,'w') as f:
             for walk_iter in range(num_walks):
                 random.shuffle(nodes)
-                iter_nodes = zip_longest(*[iter(nodes)] * 1000)
+                iter_nodes = zip_longest(*[iter(nodes)] * 10000)
                 print '\n'+str(walk_iter + 1), '/', str(num_walks)
                 for i,ns in enumerate(iter_nodes):
-                    sys.stdout.write('{}/{}\r'.format(i,nb_node))
+                    sys.stdout.write('{}/{}\r'.format(i*10000,nb_node))
                     sys.stdout.flush()
                     walks=[]
                     for n in ns:
@@ -234,7 +234,6 @@ def alias_draw(J, q):
 
 
 def grouper(n, iterable, padvalue=None):
-    "grouper(3, 'abcdefg', 'x') --> ('a','b','c'), ('d','e','f'), ('g','x','x')"
     return zip_longest(*[iter(iterable)]*n, fillvalue=padvalue)
 
 
@@ -250,24 +249,30 @@ def parse_ulink(f):
     return edges
 
 
-def load_dc_ulink(path,chunk_size=400000):
+def load_dc_ulink2(path,chunk_size=1e6):
     """
     load with multi-process
     """
     G=ThinGraph()
-    with codecs.open(path,encoding='utf8') as f:
-        with ProcessPoolExecutor(max_workers=20) as executor:
-            for idx, edges in enumerate(executor.map(parse_ulink, grouper(int(chunk_size), f))):
+    with open(path) as f:
+        lines=f.readlines()
+        print 'lines: ',len(lines)
+    fs=grouper(int(chunk_size), lines)
+    for line_group in fs:
+        print 'line_group'
+        with ProcessPoolExecutor(max_workers=10) as executor:
+            for idx, edges in enumerate(executor.map(parse_ulink, grouper(int(1e5), line_group))):
                 print idx
                 G.add_edges_from(edges)
-        return G
+    return G
 
 
-def load_dc_ulink0(path):
+def load_dc_ulink(path):
     G = ThinGraph()
     with open(path) as f:
+        lines=f.readlines()
         i = 0
-        for line in f:
+        for line in lines:
             i += 1
             if i % 100000 == 0: print i
             vlist = re.split('\t|\x01', line.strip())
