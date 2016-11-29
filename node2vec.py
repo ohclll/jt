@@ -144,18 +144,12 @@ class Graph():
         with open(out_file,'w') as f:
             for walk_iter in range(num_walks):
                 random.shuffle(nodes)
-                iter_nodes = zip_longest(*[iter(nodes)] * 10000)
                 print '\n'+str(walk_iter + 1), '/', str(num_walks)
-                for i,ns in enumerate(iter_nodes):
-                    sys.stdout.write('{}/{}\r'.format(i*10000,nb_node))
+                for i,node in enumerate(nodes):
+                    sys.stdout.write('{}/{}\r'.format(i,nb_node))
                     sys.stdout.flush()
-                    walks=[]
-                    for n in ns:
-                        if n:
-                            walk=walk_method[method](walk_length=walk_length, start_node=n)
+                    walk=walk_method[method](walk_length=walk_length, start_node=node)
                     if len(walk)>2:
-                        walks.append(walk)
-                    for walk in walks:
                         f.write(' '.join(map(str,walk))+'\n')
 
     def get_alias_edge(self, src, dst):
@@ -312,6 +306,7 @@ def parse_walk(f):
     return walks
 
 
+
 if __name__=='__main__':
     import cPickle
 
@@ -327,7 +322,7 @@ if __name__=='__main__':
     # 当p=1,q=1且method='random'的时候和deepwalk一致，只是这里用的是有向图。method改为node2vec并修改p,q值，可以使用node2vec的随机游走采样方法
     corpus_file = 'walks.csv'
     G = Graph(g, p=1.0, q=1.0)
-    G.simulate_walks(out_file=corpus_file, num_walks=2, walk_length=10,method='random')
+    G.simulate_walks(out_file=corpus_file, num_walks=3, walk_length=10,method='random')
 
     print 'simulate_walks finshed!\n start traing...'
     # corpus = LineSentence(corpus_file)
