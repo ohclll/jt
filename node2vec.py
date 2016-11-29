@@ -2,6 +2,7 @@
 from __future__ import unicode_literals
 import re
 import sys
+import codecs
 import os.path as osp
 import numpy as np
 import networkx as nx
@@ -253,7 +254,7 @@ def alias_draw(J, q):
 
 def repost_weight(repost_path,edgelist_path):
     g=ThinGraph()
-    with open(repost_path) as f:
+    with codecs.open(repost_path,'r',encoding='utf8') as f:
         for i,line in enumerate(f):
             print i
             line=line.split('\x01')
