@@ -57,6 +57,7 @@ class ThinGraph(defaultdict):
     def add_edge(self, u, v, d=1.0):
         if u != v:
             self[u][v] = d
+            self.add_node(v)
 
     def make_undirected(self):
         for u,v,d in self.edges():
@@ -70,6 +71,12 @@ class ThinGraph(defaultdict):
                     vlist=map(int,vlist)
                     u=vlist.pop(0)
                     self.add_edges_from([(u, v) for v in vlist])
+
+    def to_adjacencylist(self, path):
+        with open(path,'w') as f:
+            for u in self.nodes():
+                vlist=map(str, self.neighbors(u))
+                f.write('{}\t{}\n'.format(u,'\x01'.join(vlist)))
 
     def load_edgelist(self,path, func=lambda x: x):
         with open(path, 'r') as f:
@@ -264,7 +271,7 @@ def load_dc_ulink2(path,chunk_size=1e6):
     return g
 
 
-def load_dc_ulink(path):
+def load_dc_ulink(path,undirect=False):
     g = ThinGraph()
     with open(path) as f:
         lines=f.readlines()
@@ -277,6 +284,8 @@ def load_dc_ulink(path):
             vlist = map(np.int32, vlist)
             u = vlist.pop(0)
             edges = [(v, u, 1.0) for v in vlist]
+            if undirect:
+                edges+=[(u, v, 1.0) for v in vlist]
             g.add_edges_from(edges)
     return g
 
@@ -308,10 +317,10 @@ def parse_walk(f):
 
 
 if __name__=='__main__':
-    import cPickle
 
     # 使用好友关系构建图，这个图和deepwalk的区别在于是有向图，而且可以保存连接权重，内存消耗稍大一些，默认权重为1
-    g = load_dc_ulink('weibo_dc_parse2015_link_filter')
+    g = load_dc_ulink('weibo_dc_parse2015_link_filter',undirect=True)
+    # g.to_adjacencylist('dc_fans_ulink')
     # g.make_undirected() 转化为无向图
 
     # 增加发生转发的边的权重
@@ -319,30 +328,40 @@ if __name__=='__main__':
     # repost_weight(cfg.train_repost_file,edgelist)
     # g.load_edgelist(edgelist,lambda x: 1+np.log10(1+x))
 
+    
     # 当p=1,q=1且method='random'的时候和deepwalk一致，只是这里用的是有向图。method改为node2vec并修改p,q值，可以使用node2vec的随机游走采样方法
     corpus_file = 'walks.csv'
     G = Graph(g, p=1.0, q=1.0)
-    G.simulate_walks(out_file=corpus_file, num_walks=3, walk_length=10,method='random')
-
+    G.simulate_walks(out_file=corpus_file, num_walks=10, walk_length=16,method='random')
+    del G,g
+    
     print 'simulate_walks finshed!\n start traing...'
     # corpus = LineSentence(corpus_file)
-    corpus=[]
+    corpus_file = 'walks.csv'
     with open(corpus_file) as f:
-        with ProcessPoolExecutor(max_workers=32) as executor:
-            total = 0
-            for idx, walk_chunk in enumerate(executor.map(parse_walk, grouper(int(100000), f))):
-                print idx,len(walk_chunk)
-                corpus.extend(walk_chunk)
-                total += len(walk_chunk)
-    print 'tatal line {}'.format(total)
-    model = Word2Vec(corpus, size=64, window=3, min_count=1, sg=1, workers=cpu_count()-5, iter=2,sorted_vocab=False)
+        lines=f.readlines()
+        corpus=parse_walk(lines)
+    # with ProcessPoolExecutor(max_workers=32) as executor:
+    #     total = 0
+    #     for idx, walk_chunk in enumerate(executor.map(parse_walk, grouper(int(1000000), lines))):
+    #         print idx,len(walk_chunk)
+    #         corpus.extend(walk_chunk)
+    #         total += len(walk_chunk)
+    # print 'tatal line {}'.format(total)
+    model = Word2Vec(corpus, size=64, window=5, min_count=1, sg=1, workers=32, iter=5,sorted_vocab=False)
     model.save_word2vec_format('uid2vec.bin',binary=True)
+    
 
-    # uids = cPickle.load(open('train_uids.pkl'))
-    # uids = np.unique(uids)
-    # model=Word2Vec.load_word2vec_format('uid2vec.bin',binary=True,limit=10000)
-    # # u_embed=np.zeros((len(uids),32),dtype='float32')
-    # with open('u_embed.csv','w') as f:
-    #     for i,u in enumerate(uids):
-    #         u_embed=model[str(u)].tolist()
-    #         f.write(str(u)+','+','.join(map(str,u_embed))+'\n')
+    import cPickle
+    uids = cPickle.load(open('train_uids.pkl'))
+    uids = np.unique(uids)
+    print len(uids)
+    model=Word2Vec.load_word2vec_format('uid2vec.bin',binary=True)
+    # u_embed=np.zeros((len(uids),32),dtype='float32')
+    with open('u_embed.csv','w') as f:
+        for i,u in enumerate(uids):
+            try:
+                u_embed=model[str(u)].tolist()
+            except:
+                continue
+            f.write(str(u)+','+','.join(map(str,u_embed))+'\n')
